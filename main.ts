@@ -1,6 +1,6 @@
 /**
- * Forecaster design: volatility from winsorized one-minute changes,
- * damped recent-trend drift, asymmetric quantile bands wider below the median.
+ * Forecaster design: empirical quantile bands derived from recent one-minute price differences,
+ * with no trend drift and nearest-rank indexing.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -38,35 +38,29 @@ function processMarket(market: Market, horizonMinutes: number): MarketForecast {
   const hasPrices = prices.length > 0;
   const lastPrice = hasPrices ? prices[prices.length - 1] : 0.5;
 
-  let sigma = 0.0025;
-  if (prices.length >= 2) {
-    const history = prices.slice(-720);
-    const changes: number[] = [];
-    for (let i = 1; i < history.length; i++) {
-      const d = history[i] - history[i - 1];
-      const clipped = Math.max(-0.005, Math.min(0.005, d));
-      changes.push(clipped);
-    }
-    if (changes.length > 0) {
-      const mean = changes.reduce((acc, val) => acc + val, 0) / changes.length;
-      const variance = changes.reduce(
-        (acc, val) => acc + Math.pow(val - mean, 2),
-        0
-      ) / changes.length;
-      sigma = Math.sqrt(variance);
-    }
-  }
-  sigma = Math.max(0.0002, Math.min(0.02, sigma));
-
-  let drift = 0;
-  if (prices.length >= 61) {
-    const slope =
-      (prices[prices.length - 1] - prices[prices.length - 61]) / 60;
-    drift = slope * 0.25;
-    drift = Math.max(-0.0005, Math.min(0.0005, drift));
+  let pickedValues: number[];
+  // The 120-minute window was chosen because it scored best on fresh live market history.
+  const history = prices.slice(-120);
+  const diffs: number[] = [];
+  for (let i = 1; i < history.length; i++) {
+    const d = history[i] - history[i - 1];
+    const clipped = Math.max(-0.005, Math.min(0.005, d));
+    diffs.push(clipped);
   }
 
-  const multipliers = [-2.2, -0.8, 0, 0.6, 1.35];
+  if (diffs.length < 30) {
+    const scale = 0.0025;
+    const mults = [-2.2, -0.8, 0, 0.6, 1.35];
+    pickedValues = mults.map((m) => m * scale);
+  } else {
+    diffs.sort((a, b) => a - b);
+    const pList = [0.05, 0.25, 0.50, 0.75, 0.95];
+    pickedValues = pList.map((p) => {
+      const idx = Math.min(Math.floor(p * (diffs.length - 1)), diffs.length - 1);
+      return diffs[idx];
+    });
+  }
+
   const qRows: number[][] = [];
 
   for (let h = 1; h <= horizonMinutes; h++) {
@@ -74,14 +68,13 @@ function processMarket(market: Market, horizonMinutes: number): MarketForecast {
       qRows.push([0.5, 0.5, 0.5, 0.5, 0.5]);
       continue;
     }
-    const median = lastPrice + drift * h;
+    const median = lastPrice;
     const row: number[] = [];
     const sqrtH = Math.sqrt(h);
-    for (const m of multipliers) {
-      let val = median + m * sigma * sqrtH;
+    for (const pv of pickedValues) {
+      let val = median + pv * sqrtH;
       val = Math.max(0, Math.min(1, val));
       let rounded = Number(val.toFixed(6));
-      if (rounded === 0) rounded = 0;
       row.push(rounded);
     }
     row.sort((a, b) => a - b);
