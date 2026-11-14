@@ -1,6 +1,6 @@
 /**
  * Forecaster design: empirical quantile bands derived from recent one-minute price differences,
- * with no trend drift and nearest-rank indexing.
+ * utilizing nearest-rank indexing and square-root horizon scaling with zero trend drift.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -56,7 +56,7 @@ function processMarket(market: Market, horizonMinutes: number): MarketForecast {
     diffs.sort((a, b) => a - b);
     const pList = [0.05, 0.25, 0.50, 0.75, 0.95];
     pickedValues = pList.map((p) => {
-      const idx = Math.min(Math.floor(p * (diffs.length - 1)), diffs.length - 1);
+      const idx = Math.floor(p * (diffs.length - 1));
       return diffs[idx];
     });
   }

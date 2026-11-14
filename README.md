@@ -1,4 +1,4 @@
-# Jump-aware winsorized quantile forecaster
+# Empirical-quantile forecaster
 
 The forecaster models per-market volatility from sorted clipped one-minute differences over the most recent 120 minutes, with no trend drift and the median set to the last price.
 
